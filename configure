@@ -1,0 +1,237 @@
+#!/bin/bash
+
+#dir config
+curr_path=`pwd`
+WEB_ROOT=$curr_path/web_root
+
+#port
+SERVER_PORT=8000
+
+#buff config
+MAX_CONNECTION_NUM=1000
+REQUEST_BUFF_SIZE=4096
+LOCATION_BUFF_SIZE=512
+
+#epoll config
+EPOLL_MAX_EVENTS_NUM=1024
+
+#listen config
+LISTEN_BLOCK_LENGTH=512
+
+#cpu and process config
+#if cpu_bound = 1 bound, or 0 not bound
+CPU_NUM=`grep 'core id' /proc/cpuinfo | sort -u | wc -l`
+CPU_BOUND=1
+WORK_PROCESS_NUM=$CPU_NUM
+
+if [ -d "bin" ];then
+	rm -rf bin
+fi
+
+if [ ! -d "bin" ];then
+	mkdir bin
+	if [ ! -d "bin" ];then
+		echo "mkdir bin error "
+		exit
+	fi
+fi
+
+if [ -d "data" ];then
+	rm -rf data
+fi
+
+if [ ! -d "data" ];then
+	mkdir data
+	if [ ! -d "data" ];then
+		echo "mkdir data error "
+		exit
+	fi
+fi
+
+DATA_PATH=$curr_path/data
+
+#for line in `cat config.txt`
+FILE=config.txt
+while read line
+do
+	#echo "$line"
+	if [ "$line" = "" ];then
+		continue
+	fi
+	firstchar=${line:0:1}
+	if [ "$firstchar" = "#" ];then
+		continue
+	fi
+	name=`echo $line | cut -d = -f 1`
+	value=`echo $line | cut -d = -f 2`
+	if [ "$value" = "" ];then
+		continue
+	fi
+	if [ "$name" != "web_root" ];
+	then
+		if echo "$value" | grep -q '^[a-zA-Z0-9]\+$'; then
+			echo "config $name"
+		else
+			echo "$name=$value : invalid config"
+			exit
+		fi
+	else
+		if [ ! -d $value ];
+		then
+			echo "$value does not exist"
+			exit
+		fi
+	fi
+	case $name in
+		web_root ) 
+			WEB_ROOT=$value;;
+		server_port)
+			SERVER_PORT=$value;;
+		max_connection_num)
+			MAX_CONNECTION_NUM=$value;;
+		request_buff_size)
+			REQUEST_BUFF_SIZE=$value;;
+		location_buff_size)
+			LOCATION_BUFF_SIZE=$value;;
+		cpu_num)
+			CPU_NUM=$value;;
+		cpu_bound)
+			if [ "$value" != "1" ] && [ "$value" != "0" ];
+			then
+				echo "cpu_bound configure error"
+				exit
+			fi
+			CPU_BOUND=$value;;
+		work_process_num)
+			if [ "$value" != "$CPU_NUM" ];
+			then
+				echo -e 'config suggest : work_process_num '\
+					'is better equal to cpu_num'
+			fi
+			WORK_PROCESS_NUM=$value;;
+		epoll_max_events_num)
+			EPOLL_MAX_EVENTS_NUM=$value;;
+		listen_block_queue_length)
+			LISTEN_BLOCK_QUEUE_LENGTH=$value;;
+		*)
+			echo "$name=$value : config error";;
+	esac
+done < $FILE
+
+if [ ! -d $WEB_ROOT ];then
+	mkdir -r $WEB_ROOT
+	if [ ! -d $WEB_ROOT ];then
+		echo "$WEB_ROOT create error "
+		exit
+	fi
+fi
+
+if [ -d "obj" ];then
+	rm -rf obj
+fi
+
+if [ ! -d "obj" ];then
+	mkdir obj
+	if [ ! -d "obj" ];then
+		echo "mkdir obj error"
+		exit
+	fi
+fi
+
+CHANNEL_BUFF_SIZE=100
+
+cat>src/stp_config.h<<EOF
+#ifndef STP_CONFIG_H
+#define STP_CONFIG_H
+
+#define bool int
+#define true 1
+#define false 0
+
+#define SERVER_PORT $SERVER_PORT
+
+#define CHANNEL_BUFF_SIZE $CHANNEL_BUFF_SIZE
+
+#define WEB_ROOT "$WEB_ROOT"
+
+#define DATA_PATH "$DATA_PATH"
+
+#define MAX_CONNECTION_NUM $MAX_CONNECTION_NUM
+
+#define REQUEST_BUFF_SIZE $REQUEST_BUFF_SIZE
+
+#define LOCATION_BUFF_SIZE $LOCATION_BUFF_SIZE
+
+#define CPU_NUM $CPU_NUM
+
+#define CPU_BOUND $CPU_BOUND
+
+#define WORKPROCESS_NUM $WORK_PROCESS_NUM
+
+#define EPOLL_MAX_EVENTS_NUM $EPOLL_MAX_EVENTS_NUM
+
+#define LISTEN_BLOCK_LENGTH $LISTEN_BLOCK_LENGTH
+
+#endif
+EOF
+
+echo 'src_path = ./src/
+obj_path = ./obj/
+bin_path = ./bin/
+
+object = $(obj_path)stripling.o $(obj_path)stp_pool.o \
+		 $(obj_path)stp_server.o $(obj_path)stp_list.o \
+		 $(obj_path)stp_shmtx.o $(obj_path)stp_shm.o \
+		 $(obj_path)stp_atomic.o $(obj_path)stp_channel.o \
+		 $(obj_path)stp_connection.o
+
+all:$(bin_path)stripling $(bin_path)stp_cmd
+
+$(bin_path)stripling:$(object)
+	cc -o $(bin_path)stripling $(object)
+
+$(obj_path)stripling.o : $(src_path)stripling.c $(src_path)stp_pool.h
+	cc -c -g $(src_path)stripling.c -o $(obj_path)stripling.o
+
+$(obj_path)stp_pool.o : $(src_path)stp_pool.c $(src_path)stp_pool.h
+	cc -c -g $(src_path)stp_pool.c -o $(obj_path)stp_pool.o
+
+$(obj_path)stp_server.o : $(src_path)stp_server.c \
+	$(src_path)stp_server.h $(src_path)stp_pool.h \
+	$(src_path)stp_list.h $(src_path)stp_connection.h \
+	$(src_path)stp_shmtx.h $(src_path)stp_channel.h \
+	$(src_path)stp_config.h
+	cc -c -g $(src_path)stp_server.c -o $(obj_path)stp_server.o
+
+$(obj_path)stp_list.o : $(src_path)stp_list.c $(src_path)stp_list.h
+	cc -c -g $(src_path)stp_list.c -o $(obj_path)stp_list.o
+
+$(obj_path)stp_shmtx.o : $(src_path)stp_shmtx.c $(src_path)stp_shmtx.h
+	cc -c -g $(src_path)stp_shmtx.c -o $(obj_path)stp_shmtx.o
+
+$(obj_path)stp_shm.o : $(src_path)stp_shm.c $(src_path)stp_shm.h
+	cc -c -g $(src_path)stp_shm.c -o $(obj_path)stp_shm.o
+
+$(obj_path)stp_atomic.o : $(src_path)stp_atomic.c $(src_path)stp_atomic.h
+	cc -c -g $(src_path)stp_atomic.c -o $(obj_path)stp_atomic.o
+
+$(obj_path)stp_channel.o : $(src_path)stp_channel.c $(src_path)stp_channel.h
+	cc -c -g $(src_path)stp_channel.c -o $(obj_path)stp_channel.o
+
+$(obj_path)stp_connection.o : $(src_path)stp_connection.c \
+	$(src_path)stp_connection.h
+	cc -c -g $(src_path)stp_connection.c -o $(obj_path)stp_connection.o
+
+$(bin_path)stp_cmd : $(obj_path)stp_cmd.o
+	gcc -o $(bin_path)stp_cmd $(obj_path)stp_cmd.o
+
+$(obj_path)stp_cmd.o : $(src_path)stp_cmd.c $(src_path)stp_config.h
+	gcc -c -g $(src_path)stp_cmd.c -o $(obj_path)stp_cmd.o
+
+clean:
+	rm -f $(object) $(bin_path)stripling \
+		$(obj_path)stp_cmd.o $(bin_path)stp_cmd
+' > makefile
+
+echo "---------------------"
+echo "configure done "

@@ -1,0 +1,30 @@
+#config.txt format:
+#---------------------------
+#item_name=value
+#---------------------------
+#no more space between item_name and value
+#"#" means comments
+
+
+#dir config
+web_root=
+
+#port
+server_port=
+
+#buff config
+max_connection_num=5000
+request_buff_size=
+location_buff_size=
+
+#cpu and process config
+#if cpu_bound = 1 bound,0 not bound
+cpu_num=
+cpu_bound=
+work_process_num=
+
+#epoll config
+epoll_max_events_num=
+
+#listen config
+listen_block_queue_length=
